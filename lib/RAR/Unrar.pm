@@ -12,7 +12,7 @@ use constant COMMENTS_BUFFER_SIZE => 16384;
 
 our @EXPORT_OK = qw(list_files_in_archive process_file);
 
-our $VERSION = '1.00';
+our $VERSION = '1.01';
 
 #unrar.dll internal functions
 our (
@@ -94,7 +94,9 @@ sub extract_headers {
 sub list_files_in_archive {
     my ($file,$password) = @_;
     my ( $blockencrypted, $locked ) = extract_headers($file);
-
+    my $blockencryptedflag;
+	my $errorcode;
+	
     my $RAROpenArchiveDataEx_for_extracting =
       pack( 'ppLLpLLLLx32', $file, undef, 2, 0, undef, 0, 0, 0, 0 );
     my $handle = $RAROpenArchiveEx->Call($RAROpenArchiveDataEx_for_extracting)
@@ -102,22 +104,25 @@ sub list_files_in_archive {
     my $RARHeaderData = pack( 'x260x260LLLLLLLLLLpLL',
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, undef, 0, 0, 0 );
 
-    if ($blockencrypted) {
+    if ($blockencrypted) { #no need to check for $locked
 
         if ($password) {
             $RARSetPassword->Call( $handle, $password );
         }
         else {
-            croak "\nArchive requires password!!exiting....\n";
+			!$RARCloseArchive->Call($handle) || croak "$RARCloseArchive failed";
+			return $errorcode="requires password";
         }
     }
 
     while ( ( $RARReadHeader->Call( $handle, $RARHeaderData ) ) == 0 ) {
+	    $blockencryptedflag="yes";
         my $processresult = $RARProcessFile->Call( $handle, 0, undef, undef );
         if ( $processresult != 0 ) {
+            $errorcode=$processresult; #probably wrong password but check unrar.dll documentation for error description
             last;
         }
-        else {
+        else {	    
             my @files = unpack( 'A260A260LLLLLLLLLLpLL', $RARHeaderData );
             print "File\t\t\t\t\tSize\n";
             print "-------------------------------------------\n";
@@ -125,18 +130,21 @@ sub list_files_in_archive {
         }
 
     }
-
+    
+	if ($blockencrypted && (!defined($blockencryptedflag))) {
+		$errorcode="headers encrypted and password not correct";
+	}
+	
     !$RARCloseArchive->Call($handle) || croak "$RARCloseArchive failed";
-	return 1;
+	return $errorcode;
 }
 
 sub process_file {
     my ($file,$password) = @_;
     my ( $blockencrypted, $locked ) = extract_headers($file);
-
     my($filename, $directory, undef) = fileparse($file);
-
-    my $errorstatus;
+    my $blockencryptedflag;
+	my $errorcode;
 
     my $RAROpenArchiveDataEx_for_extracting =
       pack( 'ppLLpLLLLx32', $file, undef, 1, 0, undef, 0, 0, 0, 0 );
@@ -152,22 +160,27 @@ sub process_file {
             $RARSetPassword->Call( $handle, $password );
         }
         else {
-            croak "\nArchive requires password!!exiting....\n";
+			!$RARCloseArchive->Call($handle) || croak "$RARCloseArchive failed";
+			return $errorcode="requires password";
         }
     }
 
     while ( ( $RARReadHeader->Call( $handle, $RARHeaderData ) ) == 0 ) {
+	    $blockencryptedflag="yes";
         my $processresult = $RARProcessFile->Call( $handle, 2, $directory, undef );
         if ( $processresult != 0 ) {
-            $errorstatus = $processresult;
+            $errorcode=$processresult; #probably wrong password but check unrar.dll documentation for error description
             last;
         }
 
     }
 
-    print "#Error# : $errorstatus" if $errorstatus; #check unrar.dll documentation for error description
+	 if ($blockencrypted && (!defined($blockencryptedflag))) {
+	     $errorcode="headers encrypted and password not correct";
+	}
+	
     !$RARCloseArchive->Call($handle) || croak "RRARCloseArchive failed";
-	return 1;
+	return $errorcode;
 }
 
 declare_win32_functions();
@@ -184,16 +197,16 @@ RAR::Unrar - is a procedural module that provides manipulation (extraction and l
 	use RAR::Unrar qw(list_files_in_archive process_file);
 	
 	#usage
-	list_files_in_archive($file,$password); 
+	list_files_in_archive($file,$password);
 	process_file($file,$password); 
 	
 	#if RAR archive in the same directory as the caller
 	list_files_in_archive("myfile.rar","mypassword");
-    process_file("myfile.rar","mypassword"); 
+	process_file("myfile.rar","mypassword"); 
 	
 	#absolute path if RAR archive not in the same directory as the caller
 	list_files_in_archive("c:\mydirectory\myfile.rar","mypassword");
-    process_file("c:\mydirectory\myfile.rar","mypassword"); 
+	process_file("c:\mydirectory\myfile.rar","mypassword"); 
 		
 
 =head1 DESCRIPTION
@@ -206,6 +219,11 @@ The first one lists details embedded into the archive (files bundled into the .r
 
 Both take two parameters;the first is the file name and the second is the password required by the archive.
 If no password is required then just pass undef or the empty string as the second parameter
+
+Both procedures return undef if successfull, and an error description if something went wrong
+
+	$result=process_file($file,$password);
+	print "There was an error : $result" if defined($result);
 
 =head1 PREREQUISITES
 

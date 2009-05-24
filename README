@@ -1,6 +1,6 @@
 #######################################################################
 #
-# RAR-Unrar version 0.01 - Perl wrapper for unrar.dll. 
+# RAR-Unrar version 1.01 - Perl wrapper for unrar.dll. 
 # Manipulates RAR format compressed archives by using the unrar dll dynamic library
 # 
 # Author: Nikos Vaggalis <nikos.vaggalis@gmail.com>
@@ -13,6 +13,10 @@ It uses two functions : list_files_in_archive and process file
 
 The first one lists details embedded into the archive (files bundled into the .rar archive,archive's comments and header info) and the latter extracts the files from the archive.
 
+Both procedures return undef if successfull, and an error description if something went wrong
+	$result=process_file($file,$password); 
+	print "There was an error : $result" if defined($result);
+	
 sample usage :
 
 	list_files_in_archive($file,$password); 
